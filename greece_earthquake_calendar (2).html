@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greece Earthquake Calendar</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;padding:16px 16px 40vh;background:#f5f5f5;color:#222}
+.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h1{font-size:1.3rem;margin:0}
+.yr button{border:0;background:#0d5eaf;color:#fff;border-radius:6px;padding:4px 12px;font-size:1rem;cursor:pointer}
+.yr b{margin:0 8px;font-size:1.1rem}
+#status{font-size:.85rem;color:#555;margin:6px 0 10px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.85rem;margin-bottom:14px}
+.legend span::before{content:"";display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:5px;vertical-align:-2px;background:var(--c)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.month{background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 3px #0002}
+.month h2{font-size:1rem;margin:0 0 6px;text-align:center}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;font-size:.75rem}
+.dow{font-weight:600;color:#777}
+.d{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;background:#e5e5e5;color:#888;border:2px solid transparent}
+.d small{font-size:.55rem;line-height:1}
+.d.click{cursor:pointer}.d.click:hover{border-color:#000}.d.sel{border-color:#000;box-shadow:0 0 0 2px #fff inset}
+.g{background:#4caf50;color:#fff}.y{background:#fdd835;color:#222}.r{background:#e53935;color:#fff}
+#panel{position:fixed;left:0;right:0;bottom:0;max-height:45vh;overflow:auto;background:#fff;box-shadow:0 -3px 12px #0004;padding:12px 16px;display:none;border-radius:12px 12px 0 0}
+#panel h3{margin:0 0 8px;font-size:1rem}
+#panel button{float:right;border:0;background:#ddd;border-radius:6px;padding:3px 10px;cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:.82rem}
+th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #eee}
+th{background:#fafafa;position:sticky;top:0}
+.m{font-weight:700}tr.ev{cursor:pointer}tr.ev:hover td{background:#eef5ff}a{color:#0d5eaf}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>Greece earthquake calendar</h1>
+  <div class="yr"><button id="prev">◀</button><b id="yr"></b><button id="next">▶</button></div>
+</div>
+<div id="status">Loading EMSC earthquake data…</div>
+<div class="legend">
+  <span style="--c:#4caf50">0 earthquakes</span>
+  <span style="--c:#fdd835">1–5 earthquakes</span>
+  <span style="--c:#e53935">more than 5</span>
+  <span style="--c:#e5e5e5">future / no data</span>
+  <span>Magnitude ≥ 3.0 · click a day for the list, click an event to open its EMSC page</span>
+</div>
+<div class="grid" id="cal"></div>
+
+<div id="panel"><button id="close">Close ✕</button><h3 id="ptitle"></h3><div id="pbody"></div></div>
+
+<script>
+const NOW = new Date();
+let year = NOW.getFullYear();            // the year in which the user opens the page
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const fmt=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Athens",year:"numeric",month:"2-digit",day:"2-digit"});
+const tfmt=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Athens",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+const todayKey=fmt.format(NOW);
+let byDay={}, loaded=false, selected=null;
+const $=id=>document.getElementById(id);
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function render(){
+  $("yr").textContent=year; $("next").disabled=year>=NOW.getFullYear();
+  const cal=$("cal"); cal.innerHTML="";
+  for(let m=0;m<12;m++){
+    const first=new Date(Date.UTC(year,m,1)), n=new Date(Date.UTC(year,m+1,0)).getUTCDate(), off=(first.getUTCDay()+6)%7;
+    let h=`<div class="month"><h2>${MONTHS[m]}</h2><div class="days">`;
+    ["M","T","W","T","F","S","S"].forEach(x=>h+=`<div class="dow">${x}</div>`);
+    for(let i=0;i<off;i++) h+="<div></div>";
+    for(let d=1;d<=n;d++){
+      const key=`${year}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      let cls="",label="",title=key,click="";
+      if(loaded&&key<=todayKey){
+        const c=(byDay[key]||[]).length;
+        cls=c===0?"g":c<=5?"y":"r"; label=c?`<small>${c}</small>`:"";
+        title+=`: ${c} earthquake${c===1?"":"s"} M≥3`; click=" click";
+      }
+      h+=`<div class="d ${cls}${click}${key===selected?" sel":""}" data-k="${key}" title="${title}">${d}${label}</div>`;
+    }
+    cal.insertAdjacentHTML("beforeend",h+"</div></div>");
+  }
+}
+
+const EVURL="https://www.emsc-csem.org/Earthquake_information/earthquake.php?id=";
+const ATH={lat:37.9838,lon:23.7275};
+const rad=x=>x*Math.PI/180;
+function fromAthens(lat,lon){
+  const R=6371,dLat=rad(lat-ATH.lat),dLon=rad(lon-ATH.lon);
+  const a=Math.sin(dLat/2)**2+Math.cos(rad(ATH.lat))*Math.cos(rad(lat))*Math.sin(dLon/2)**2;
+  const km=2*R*Math.asin(Math.sqrt(a));
+  const y=Math.sin(dLon)*Math.cos(rad(lat)), x=Math.cos(rad(ATH.lat))*Math.sin(rad(lat))-Math.sin(rad(ATH.lat))*Math.cos(rad(lat))*Math.cos(dLon);
+  const b=(Math.atan2(y,x)*180/Math.PI+360)%360;
+  return {km,dir:["N","NE","E","SE","S","SW","W","NW"][Math.round(b/45)%8]};
+}
+function showDay(key){
+  selected=key; render();
+  const list=(byDay[key]||[]).slice().sort((a,b)=>b.mag-a.mag||a.t-b.t);
+  $("ptitle").textContent=`${key} — ${list.length} earthquake${list.length===1?"":"s"} (M≥3.0)`;
+  $("pbody").innerHTML=list.length?
+    `<table><tr><th>#</th><th>Time (Athens)</th><th>Mag</th><th>Depth</th><th>Region</th><th>Distance from Athens</th><th>Direction from Athens</th><th>Lat, Lon</th><th>Event page</th></tr>`+
+    list.map((e,i)=>`<tr class="${e.id?"ev":""}" data-url="${e.id?EVURL+encodeURIComponent(e.id):""}"><td>${i+1}</td><td>${tfmt.format(new Date(e.t))}</td><td class="m">${e.mag.toFixed(1)}</td><td>${e.depth!=null?Math.round(e.depth)+" km":"–"}</td><td>${esc(e.region)}</td><td>${Math.round(fromAthens(e.lat,e.lon).km)} km</td><td>${fromAthens(e.lat,e.lon).dir}</td><td>${e.lat.toFixed(2)}, ${e.lon.toFixed(2)}</td><td>${e.id?`<a href="${EVURL+encodeURIComponent(e.id)}" target="_blank" rel="noopener">EMSC ↗</a>`:"–"}</td></tr>`).join("")+`</table>`
+    :"No earthquakes of magnitude 3.0 or higher recorded this day.";
+  $("panel").style.display="block";
+}
+
+async function load(){
+  loaded=false; byDay={}; selected=null; $("panel").style.display="none"; render();
+  $("status").textContent=`Loading EMSC earthquake data for ${year}…`;
+  const u=`https://www.seismicportal.eu/fdsnws/event/1/query?format=json&minmag=3&orderby=time&limit=20000&start=${year}-01-01&end=${year+1}-01-01&minlat=34.5&maxlat=42&minlon=19&maxlon=29.7`;
+  try{
+    const j=await (await fetch(u)).json(); let total=0;
+    j.features.forEach(f=>{const p=f.properties; if(p.mag<3) return;
+      const t=Date.parse(p.time), k=fmt.format(new Date(t));
+      (byDay[k]=byDay[k]||[]).push({t,mag:p.mag,depth:p.depth,region:p.flynn_region||"Greece",lat:p.lat,lon:p.lon,id:p.source_id||null}); total++;});
+    loaded=true; render();
+    const red=Object.values(byDay).filter(a=>a.length>5).length;
+    $("status").textContent=`EMSC ${year}: ${total} earthquakes M≥3.0 · ${red} red day(s) · times in Greek local time`;
+  }catch(e){$("status").textContent="Could not load EMSC data. Check your internet connection and open the file in a regular browser (not a preview).";}
+}
+
+$("cal").addEventListener("click",e=>{const d=e.target.closest(".d.click"); if(d) showDay(d.dataset.k);});
+$("pbody").addEventListener("click",e=>{if(e.target.closest("a"))return;const r=e.target.closest("tr.ev");if(r)window.open(r.dataset.url,"_blank","noopener");});
+$("close").onclick=()=>{$("panel").style.display="none";selected=null;render();};
+$("prev").onclick=()=>{year--;load();};
+$("next").onclick=()=>{if(year<NOW.getFullYear()){year++;load();}};
+load();
+</script>
+</body>
+</html>
